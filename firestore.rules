@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users can only access their own user document
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Saved Projects Collection - Simple bookmarks
+      match /savedProjects/{projectId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        
+        // Validate data structure for saved projects
+        allow create: if request.auth != null 
+                     && request.auth.uid == userId
+                     && validateSavedProject(request.resource.data);
+        
+        allow update: if request.auth != null 
+                     && request.auth.uid == userId
+                     && validateSavedProjectUpdate(request.resource.data);
+      }
+      
+      // Active Projects Collection - Projects with progress tracking
+      match /activeProjects/{projectId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        
+        // Validate data structure for active projects
+        allow create: if request.auth != null 
+                     && request.auth.uid == userId
+                     && validateActiveProject(request.resource.data);
+        
+        allow update: if request.auth != null 
+                     && request.auth.uid == userId
+                     && validateActiveProjectUpdate(request.resource.data);
+      }
+    }
+    
+    // Helper functions for validation
+    
+    // Validate saved project structure
+    function validateSavedProject(data) {
+      return data.keys().hasAll(['title', 'description', 'userId', 'savedAt']) &&
+             data.userId == request.auth.uid &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() <= 200 &&
+             data.description is string &&
+             data.description.size() <= 1000 &&
+             data.savedAt is string;
+    }
+    
+    // Validate saved project updates (for favorites, etc.)
+    function validateSavedProjectUpdate(data) {
+      return data.userId == request.auth.uid &&
+             (!data.keys().hasAny(['userId', 'savedAt']) || 
+              (data.userId == resource.data.userId && data.savedAt == resource.data.savedAt));
+    }
+    
+    // Validate active project structure
+    function validateActiveProject(data) {
+      return data.keys().hasAll(['title', 'description', 'userId', 'startedAt', 'progress', 'status']) &&
+             data.userId == request.auth.uid &&
+             data.title is string &&
+             data.title.size() > 0 &&
+             data.title.size() <= 200 &&
+             data.description is string &&
+             data.description.size() <= 1000 &&
+             data.startedAt is string &&
+             data.status in ['active', 'completed', 'paused'] &&
+             validateProgress(data.progress);
+    }
+    
+    // Validate active project updates
+    function validateActiveProjectUpdate(data) {
+      return data.userId == request.auth.uid &&
+             (!data.keys().hasAny(['userId', 'startedAt']) || 
+              (data.userId == resource.data.userId && data.startedAt == resource.data.startedAt)) &&
+             (!'status' in data || data.status in ['active', 'completed', 'paused']) &&
+             (!'progress' in data || validateProgress(data.progress));
+    }
+    
+    // Validate progress object structure
+    function validateProgress(progress) {
+      return progress is map &&
+             progress.keys().hasAll(['completedSteps', 'currentStep', 'lastUpdated']) &&
+             progress.completedSteps is list &&
+             progress.currentStep is number &&
+             progress.currentStep >= 0 &&
+             progress.lastUpdated is string;
+    }
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+} 
